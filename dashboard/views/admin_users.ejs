@@ -22,7 +22,7 @@
           <tr data-id="<%= u.id %>" data-approved="<%= u.approved %>">
             <td>
               <% if (u.avatar) { %>
-                <img src="https://cdn.discordapp.com/avatars/<%= u.id %>/<%= u.avatar %>.png" alt="avatar" width="32" height="32">
+                <img src="<%= u.avatar %>" alt="avatar" width="32" height="32">
               <% } %>
             </td>
             <td><%= u.id %></td>
