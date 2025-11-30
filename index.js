@@ -42,30 +42,22 @@ client.once('ready', async () => {
   }
 });
 
-// Detectar streaming
+// Detectar se o usuário está transmitindo
 function isStreaming(presence) {
-  if (!presence || !presence.activities) return false;
-
-  return presence.activities.some(a =>
-    a?.type === ActivityType.Streaming ||
-    a?.type === 1 ||
-    (a?.url && a.url.includes("twitch.tv")) ||
-    (a?.url && a.url.includes("youtube.com"))
-  );
+  if (!presence?.activities?.length) return false;
+  return presence.activities.some(a => a.type === ActivityType.Streaming);
 }
 
 // Evento principal
 client.on('presenceUpdate', async (oldP, newP) => {
   try {
-    if (!newP || !newP.member || !newP.guild) return;
+    if (!newP?.member || !newP.guild) return;
 
     const member = newP.member;
     const guild = newP.guild;
 
     const wasStreaming = isStreaming(oldP);
     const isNowStreaming = isStreaming(newP);
-
-    console.log(`👀 Atualização de presença: ${member.user.tag} | Was: ${wasStreaming} | Now: ${isNowStreaming}`);
 
     // --- COMEÇOU A STREAMAR ---
     if (!wasStreaming && isNowStreaming) {
@@ -74,16 +66,6 @@ client.on('presenceUpdate', async (oldP, newP) => {
       const channel =
         client.channels.cache.get(CHANNEL) ||
         guild.channels.cache.get(CHANNEL);
-
-      const embed = new EmbedBuilder()
-        .setColor(process.env.EMBED_COLOR || '#9146ff')
-        .setTitle(process.env.EMBED_TITLE || '🎬 Live AO VIVO!')
-        .setDescription(`**${member.displayName}** iniciou uma transmissão!`)
-        .setThumbnail(member.user.displayAvatarURL())
-        .setFooter({
-          text: process.env.EMBED_FOOTER || 'Sistema Automático de Alertas'
-        })
-        .setTimestamp();
 
       // Adicionar cargo
       if (STREAMER_ROLE) {
@@ -94,8 +76,17 @@ client.on('presenceUpdate', async (oldP, newP) => {
           console.warn(`⚠ Não consegui adicionar o cargo:`, err.message);
         }
       }
-      // Enviar mensagem
-      if (channel && channel.isTextBased()) {
+
+      // Enviar mensagem no canal
+      if (channel?.isTextBased()) {
+        const embed = new EmbedBuilder()
+          .setColor(process.env.EMBED_COLOR || '#9146ff')
+          .setTitle(process.env.EMBED_TITLE || '🎬 Live AO VIVO!')
+          .setDescription(`**${member.displayName}** iniciou a transmissão!`)
+          .setThumbnail(member.user.displayAvatarURL())
+          .setFooter({ text: process.env.EMBED_FOOTER || 'Sistema Automático de Alertas' })
+          .setTimestamp();
+
         await channel.send({
           content: STREAMER_ROLE ? `<@&${STREAMER_ROLE}>` : null,
           embeds: [embed]
@@ -110,8 +101,6 @@ client.on('presenceUpdate', async (oldP, newP) => {
         avatar: member.user.displayAvatarURL(),
         startedAt: new Date().toISOString()
       });
-
-      return;
     }
 
     // --- PAROU DE STREAMAR ---
