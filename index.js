@@ -51,47 +51,56 @@ async function announceStream(username, guild, platform, streamUrl) {
   }
 }
 
-// Verifica se o canal da Twitch está ao vivo
+// Twitch
 async function checkTwitchLive() {
-  const clientId = process.env.TWITCH_CLIENT_ID;
-  const clientSecret = process.env.TWITCH_CLIENT_SECRET;
-  const username = process.env.TWITCH_USER;
+  try {
+    const clientId = process.env.TWITCH_CLIENT_ID;
+    const clientSecret = process.env.TWITCH_CLIENT_SECRET;
+    const username = process.env.TWITCH_USER;
 
-  if (!clientId || !clientSecret || !username) return null;
+    if (!clientId || !clientSecret || !username) return null;
 
-  // Obter token
-  const tokenRes = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`, { method: 'POST' });
-  const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) return null;
+    const tokenRes = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`, { method: 'POST' });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) return null;
 
-  // Verificar live
-  const res = await fetch(`https://api.twitch.tv/helix/streams?user_login=${username}`, {
-    headers: { 'Client-ID': clientId, 'Authorization': `Bearer ${tokenData.access_token}` }
-  });
-  const data = await res.json();
+    const res = await fetch(`https://api.twitch.tv/helix/streams?user_login=${username}`, {
+      headers: { 'Client-ID': clientId, 'Authorization': `Bearer ${tokenData.access_token}` }
+    });
+    const data = await res.json();
 
-  if (data?.data?.length && data.data[0].type === 'live') {
-    const streamUrl = `https://www.twitch.tv/${username}`;
-    return { username, platform: 'Twitch', url: streamUrl };
+    if (data?.data?.length && data.data[0].type === 'live') {
+      return { username, platform: 'Twitch', url: `https://www.twitch.tv/${username}` };
+    }
+  } catch (err) {
+    console.warn('Erro ao verificar Twitch:', err.message);
   }
   return null;
 }
 
-// Verifica se o canal do YouTube está ao vivo
+// YouTube
 async function checkYouTubeLive() {
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  const channelId = process.env.YOUTUBE_CHANNEL;
+  try {
+    const apiKey = process.env.YOUTUBE_API_KEY;
+    const channelId = process.env.YOUTUBE_CHANNEL;
 
-  if (!apiKey || !channelId) return null;
+    if (!apiKey || !channelId) return null;
 
-  const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&eventType=live&key=${apiKey}`);
-  const data = await res.json();
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&eventType=live&key=${apiKey}`);
+    const data = await res.json();
 
-  if (data.items?.length) {
-    const videoId = data.items[0].id.videoId;
-    const username = data.items[0].snippet.channelTitle;
-    const streamUrl = `https://www.youtube.com/watch?v=${videoId}`;
-    return { username, platform: 'YouTube', url: streamUrl };
+    if (data.items?.length) {
+      const video = data.items[0];
+      if (video.snippet.liveBroadcastContent === 'live') {
+        return {
+          username: video.snippet.channelTitle,
+          platform: 'YouTube',
+          url: `https://www.youtube.com/watch?v=${video.id.videoId}`
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('Erro ao verificar YouTube:', err.message);
   }
   return null;
 }
@@ -133,9 +142,7 @@ client.on('interactionCreate', async interaction => {
     const twitchLive = await checkTwitchLive();
     const ytLive = await checkYouTubeLive();
 
-    const allStreams = [];
-    if (twitchLive) allStreams.push(twitchLive);
-    if (ytLive) allStreams.push(ytLive);
+    const allStreams = [twitchLive, ytLive].filter(Boolean);
 
     if (!allStreams.length) {
       await interaction.followUp('Nenhum canal está ao vivo agora.');
