@@ -8,8 +8,8 @@ const {
   SlashCommandBuilder,
   Routes
 } = require('discord.js');
-
 const { REST } = require('@discordjs/rest');
+const fetch = require('node-fetch'); // Certifique-se de instalar node-fetch
 const realtime = require('./realtime');
 
 const client = new Client({
@@ -26,7 +26,7 @@ const CHANNEL = process.env.STREAM_ANNOUNCE_CHANNEL;
 const STREAMER_ROLE = process.env.STREAMER_ROLE;
 const GUILD_ID = process.env.GUILD_ID;
 
-// Detectar se o usuário está transmitindo
+// Função para detectar streaming no Discord
 function isStreaming(presence) {
   if (!presence?.activities?.length) return false;
   const streamingActivity = presence.activities.find(a => a.type === ActivityType.Streaming);
@@ -65,17 +65,63 @@ async function announceStream(member, guild) {
     });
   }
 
-  // Notificação realtime
-  realtime.emit('streamStart', {
-    userId: member.user.id,
-    username: member.user.username,
-    displayName: member.displayName,
-    avatar: member.user.displayAvatarURL(),
-    startedAt: new Date().toISOString()
-  });
+  // Notificação realtime (opcional)
+  if (realtime) {
+    realtime.emit('streamStart', {
+      userId: member.user.id,
+      username: member.user.username,
+      displayName: member.displayName,
+      avatar: member.user.displayAvatarURL(),
+      startedAt: new Date().toISOString()
+    });
+  }
 }
 
-// Quando o bot inicia
+// Funções de verificação de Twitch
+async function checkTwitchLiveForVarredura(guild) {
+  const clientId = process.env.TWITCH_CLIENT_ID;
+  const clientSecret = process.env.TWITCH_CLIENT_SECRET;
+  const users = process.env.TWITCH_USERS?.split(',').map(u => u.trim());
+  if (!clientId || !clientSecret || !users?.length) return [];
+
+  const tokenRes = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`, { method: 'POST' });
+  const tokenData = await tokenRes.json();
+  if (!tokenData.access_token) return [];
+
+  const query = users.map(u => `user_login=${u}`).join('&');
+  const res = await fetch(`https://api.twitch.tv/helix/streams?${query}`, {
+    headers: { 'Client-ID': clientId, 'Authorization': `Bearer ${tokenData.access_token}` }
+  });
+  const data = await res.json();
+  if (!data?.data?.length) return [];
+
+  const streamingMembers = [];
+  data.data.forEach(stream => {
+    const member = guild.members.cache.find(m => m.user.username.toLowerCase() === stream.user_name.toLowerCase());
+    if (member) streamingMembers.push(member);
+  });
+  return streamingMembers;
+}
+
+// Funções de verificação de YouTube
+async function checkYouTubeLiveForVarredura(guild) {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  const channels = process.env.YOUTUBE_CHANNELS?.split(',').map(c => c.trim());
+  if (!apiKey || !channels?.length) return [];
+
+  const streamingMembers = [];
+  for (const channelId of channels) {
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&eventType=live&key=${apiKey}`);
+    const data = await res.json();
+    if (data.items?.length) {
+      const member = guild.members.cache.find(m => m.user.username.toLowerCase() === channelId.toLowerCase());
+      if (member) streamingMembers.push(member);
+    }
+  }
+  return streamingMembers;
+}
+
+// Evento ready
 client.once('ready', async () => {
   console.log(`✅ Bot iniciado como ${client.user.tag}`);
 
@@ -86,7 +132,7 @@ client.once('ready', async () => {
     console.error("❌ Erro ao enviar a mensagem inicial:", err);
   }
 
-  // Varredura automática para detectar quem já está transmitindo
+  // Varredura automática ao iniciar
   const guild = client.guilds.cache.get(GUILD_ID);
   if (guild) {
     await guild.members.fetch();
@@ -110,11 +156,10 @@ client.once('ready', async () => {
   }
 });
 
-// Evento principal
+// Evento presenceUpdate
 client.on('presenceUpdate', async (oldP, newP) => {
   try {
     if (!newP?.member || !newP.guild) return;
-
     const member = newP.member;
     const guild = newP.guild;
 
@@ -131,12 +176,14 @@ client.on('presenceUpdate', async (oldP, newP) => {
       if (STREAMER_ROLE && member.roles.cache.has(STREAMER_ROLE)) {
         await member.roles.remove(STREAMER_ROLE).catch(err => console.warn(err.message));
       }
-      realtime.emit('streamStop', {
-        userId: member.user.id,
-        username: member.user.username,
-        displayName: member.displayName,
-        stoppedAt: new Date().toISOString()
-      });
+      if (realtime) {
+        realtime.emit('streamStop', {
+          userId: member.user.id,
+          username: member.user.username,
+          displayName: member.displayName,
+          stoppedAt: new Date().toISOString()
+        });
+      }
     }
   } catch (err) {
     console.error("❌ Erro no presenceUpdate:", err);
@@ -146,21 +193,24 @@ client.on('presenceUpdate', async (oldP, newP) => {
 // Comandos slash
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand()) return;
-
   const guild = interaction.guild;
 
   if (interaction.commandName === 'varredura') {
-    await interaction.reply('🔎 Iniciando varredura de membros...');
+    await interaction.reply('🔎 Iniciando varredura completa de membros...');
     await guild.members.fetch();
 
-    const streamingMembers = guild.members.cache.filter(m => isStreaming(m.presence));
-    if (!streamingMembers.size) {
+    const discordStreaming = guild.members.cache.filter(m => isStreaming(m.presence));
+    const twitchStreaming = await checkTwitchLiveForVarredura(guild);
+    const youtubeStreaming = await checkYouTubeLiveForVarredura(guild);
+
+    const allStreamingMembers = new Map();
+    [...discordStreaming.values(), ...twitchStreaming, ...youtubeStreaming].forEach(m => allStreamingMembers.set(m.id, m));
+
+    if (!allStreamingMembers.size) {
       await interaction.followUp('Nenhum membro está transmitindo agora.');
     } else {
-      for (const member of streamingMembers.values()) {
-        await announceStream(member, guild);
-      }
-      await interaction.followUp(`✅ Varredura concluída. ${streamingMembers.size} membros notificados.`);
+      for (const member of allStreamingMembers.values()) announceStream(member, guild);
+      await interaction.followUp(`✅ Varredura completa concluída. ${allStreamingMembers.size} membros notificados.`);
     }
   }
 
@@ -174,8 +224,8 @@ client.on('interactionCreate', async interaction => {
     }
   }
 });
-
-// EXPORT
+ 
+// Export
 module.exports = client;
 
 // Executar diretamente
