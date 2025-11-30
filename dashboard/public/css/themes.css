@@ -1,9 +1,0 @@
-:root{--bg:#0e0e10;--panel:#18181b;--accent:#9146ff;--text:#fff}
-body{margin:0;font-family:Segoe UI,Arial;background:var(--bg);color:var(--text)}
-.box{max-width:900px;margin:40px auto;padding:20px;background:var(--panel);border-radius:12px;border:1px solid var(--accent)}
-input,textarea,select{width:100%;padding:10px;margin:8px 0;border-radius:6px;border:1px solid var(--accent);background:#111;color:var(--text)}
-button{background:var(--accent);border:none;color:var(--text);padding:10px 14px;border-radius:8px;cursor:pointer}
-.theme-dark{--bg:#0e0e10;--panel:#18181b;--accent:#9146ff;--text:#fff}
-.theme-light{--bg:#f5f5f7;--panel:#ffffff;--accent:#7b61ff;--text:#111}
-.theme-neon{--bg:#05060a;--panel:#07122a;--accent:#00fff7;--text:#eaffff}
-.theme-purple{--bg:#0b0712;--panel:#1d0f2b;--accent:#b77bff;--text:#fff}

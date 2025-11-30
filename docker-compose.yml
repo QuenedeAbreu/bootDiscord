@@ -7,13 +7,3 @@ services:
     env_file: 
       - .env
     restart: always
-
-  dashboard:
-    build:
-      context: .
-      dockerfile: Dockerfile-dashboard
-    ports:
-      - "3000:3000"
-    env_file:
-      - .env
-    restart: always
