@@ -1,0 +1,8 @@
+{
+  "apps": [
+    {
+      "name": "bot",
+      "script": "index.js"
+    }
+  ]
+}

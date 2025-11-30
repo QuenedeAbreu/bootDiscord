@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Admin Usuários</title><link rel="stylesheet" href="/css/themes.css"></head>
+<body>
+  <div class="box">
+    <h1>Usuários</h1>
+    <div style="margin-bottom:12px; display:flex; gap:8px; align-items:center;">
+      <input id="search" placeholder="Buscar por usuário ou ID" style=" padding:6px;">
+      <select id="statusFilter" style="padding:6px;">
+        <option value="all">Todos</option>
+        <option value="pending">Pendentes</option>
+        <option value="approved">Aprovados</option>
+      </select>
+      <button id="approveAll">Aprovar todos pendentes</button>
+    </div>
+    <table>
+      <thead>
+        <tr><th>Avatar</th><th>ID</th><th>Usuário</th><th>Status</th><th>Criado</th><th>Ações</th></tr>
+      </thead>
+      <tbody id="usersBody">
+        <% users.forEach(u=>{ %>
+          <tr data-id="<%= u.id %>" data-approved="<%= u.approved %>">
+            <td>
+              <% if (u.avatar) { %>
+                <img src="https://cdn.discordapp.com/avatars/<%= u.id %>/<%= u.avatar %>.png" alt="avatar" width="32" height="32">
+              <% } %>
+            </td>
+            <td><%= u.id %></td>
+            <td><%= u.username %></td>
+            <td class="status"><%= u.approved ? 'Aprovado' : 'Pendente' %></td>
+            <td><%= u.created_at %></td>
+            <td>
+              <button class="approveBtn" data-id="<%= u.id %>" style="display:<%= u.approved ? 'none' : 'inline-block' %>">Aprovar</button>
+              <button class="revokeBtn" data-id="<%= u.id %>" style="display:<%= u.approved ? 'inline-block' : 'none' %>">Revogar</button>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+    <div id="msg" style="margin-top:8px;"></div>
+    <div style="margin-top:12px; display:flex; gap:8px;">
+      <a href="/"><button>Voltar</button></a>
+      <a href="/logout"><button>Sair</button></a>
+    </div>
+  </div>
+  <script>
+    const body = document.getElementById('usersBody');
+    const msg = document.getElementById('msg');
+    function setMessage(text, ok){
+      msg.textContent = text;
+      msg.style.color = ok ? '#16a34a' : '#dc2626';
+    }
+    body.addEventListener('click', async (e) => {
+      const t = e.target;
+      if (t.classList.contains('approveBtn')) {
+        const id = t.dataset.id;
+        const res = await fetch('/admin/users/approve', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ id }) });
+        const json = await res.json();
+        if (json && json.ok) {
+          const row = body.querySelector(`tr[data-id="${id}"]`);
+          row.dataset.approved = '1';
+          row.querySelector('.status').textContent = 'Aprovado';
+          row.querySelector('.approveBtn').style.display = 'none';
+          row.querySelector('.revokeBtn').style.display = 'inline-block';
+          setMessage('Usuário aprovado', true);
+        } else {
+          setMessage('Falha ao aprovar usuário', false);
+        }
+      }
+      if (t.classList.contains('revokeBtn')) {
+        const id = t.dataset.id;
+        const res = await fetch('/admin/users/revoke', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' }, body: JSON.stringify({ id }) });
+        const json = await res.json();
+        if (json && json.ok) {
+          const row = body.querySelector(`tr[data-id="${id}"]`);
+          row.dataset.approved = '0';
+          row.querySelector('.status').textContent = 'Pendente';
+          row.querySelector('.approveBtn').style.display = 'inline-block';
+          row.querySelector('.revokeBtn').style.display = 'none';
+          setMessage('Acesso revogado', true);
+        } else {
+          setMessage('Falha ao revogar acesso', false);
+        }
+      }
+    });
+    document.getElementById('approveAll').addEventListener('click', async () => {
+      const res = await fetch('/admin/users/approve-all', { method: 'POST', headers: { 'Accept': 'application/json' } });
+      const json = await res.json();
+      if (json && json.ok) {
+        body.querySelectorAll('tr').forEach(row => {
+          if (row.dataset.approved === '0') {
+            row.dataset.approved = '1';
+            row.querySelector('.status').textContent = 'Aprovado';
+            row.querySelector('.approveBtn').style.display = 'none';
+            row.querySelector('.revokeBtn').style.display = 'inline-block';
+          }
+        });
+        setMessage('Todos aprovados', true);
+      } else {
+        setMessage('Falha ao aprovar todos', false);
+      }
+    });
+    const search = document.getElementById('search');
+    const statusFilter = document.getElementById('statusFilter');
+    function applyFilters(){
+      const q = search.value.toLowerCase();
+      const f = statusFilter.value;
+      body.querySelectorAll('tr').forEach(row => {
+        const id = row.children[1].textContent.toLowerCase();
+        const user = row.children[2].textContent.toLowerCase();
+        const approved = row.dataset.approved === '1';
+        const matchesText = id.includes(q) || user.includes(q);
+        const matchesStatus = f === 'all' || (f === 'pending' && !approved) || (f === 'approved' && approved);
+        row.style.display = matchesText && matchesStatus ? '' : 'none';
+      });
+    }
+    search.addEventListener('input', applyFilters);
+    statusFilter.addEventListener('change', applyFilters);
+  </script>
+</body>
+</html>

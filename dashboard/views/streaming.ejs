@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Streamers</title><link rel="stylesheet" href="/css/themes.css"></head>
+<body>
+  <div class="box">
+    <h1>Streamers</h1>
+    <label>Theme</label>
+    <select id="theme-select">
+      <option value="theme-dark">Dark</option>
+      <option value="theme-light">Light</option>
+      <option value="theme-neon">Neon</option>
+      <option value="theme-purple">Purple</option>
+    </select>
+    <h2>Online</h2>
+    <ul id="online-list"><% online.forEach(o=>{ %><li><%= o %></li><% }) %></ul>
+    <h2>Streaming</h2>
+    <ul id="streaming-list"><% streaming.forEach(s=>{ %><li><%= s %></li><% }) %></ul>
+    <a href="/"><button>Voltar</button></a>
+    <a href="/logout"><button>Sair</button></a>
+  </div>
+  <script src="/js/socket-client.js"></script>
+  <script src="/js/theme.js"></script>
+</body>
+</html>
