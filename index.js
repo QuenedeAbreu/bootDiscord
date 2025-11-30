@@ -22,17 +22,35 @@ const client = new Client({
 const CHANNEL = process.env.STREAM_ANNOUNCE_CHANNEL;
 const STREAMER_ROLE = process.env.STREAMER_ROLE;
 
-// Bot online
-client.once('ready', () => {
-  console.log(`✅ Bot online como ${client.user.tag}`);
+// Quando o bot inicia
+client.once('ready', async () => {
+  console.log(`✅ Bot iniciado como ${client.user.tag}`);
+
+  try {
+    const channel =
+      client.channels.cache.get(CHANNEL) ||
+      (await client.channels.fetch(CHANNEL).catch(() => null));
+
+    if (channel && channel.isTextBased()) {
+      await channel.send("🔵 **Bot iniciado e pronto para uso!**");
+      console.log("📢 Mensagem inicial enviada com sucesso.");
+    } else {
+      console.log("⚠ Canal inicial não encontrado ou não é de texto.");
+    }
+  } catch (err) {
+    console.error("❌ Erro ao enviar a mensagem inicial:", err);
+  }
 });
 
 // Detectar streaming
 function isStreaming(presence) {
   if (!presence || !presence.activities) return false;
 
-  return presence.activities.some(
-    (a) => a.type === ActivityType.Streaming || a.type === 1
+  return presence.activities.some(a =>
+    a?.type === ActivityType.Streaming ||
+    a?.type === 1 ||
+    (a?.url && a.url.includes("twitch.tv")) ||
+    (a?.url && a.url.includes("youtube.com"))
   );
 }
 
@@ -47,23 +65,23 @@ client.on('presenceUpdate', async (oldP, newP) => {
     const wasStreaming = isStreaming(oldP);
     const isNowStreaming = isStreaming(newP);
 
-    // → COMEÇOU A STREAMAR
+    console.log(`👀 Atualização de presença: ${member.user.tag} | Was: ${wasStreaming} | Now: ${isNowStreaming}`);
+
+    // --- COMEÇOU A STREAMAR ---
     if (!wasStreaming && isNowStreaming) {
       console.log(`🎥 ${member.user.tag} começou a streamar.`);
 
-      // Pegar canal
       const channel =
         client.channels.cache.get(CHANNEL) ||
         guild.channels.cache.get(CHANNEL);
 
-      // Embed
       const embed = new EmbedBuilder()
         .setColor(process.env.EMBED_COLOR || '#9146ff')
         .setTitle(process.env.EMBED_TITLE || '🎬 Live AO VIVO!')
-        .setDescription(`**${member.displayName}** começou uma transmissão!`)
+        .setDescription(`**${member.displayName}** iniciou uma transmissão!`)
         .setThumbnail(member.user.displayAvatarURL())
         .setFooter({
-          text: process.env.EMBED_FOOTER || 'Sistema de Alertas de Stream'
+          text: process.env.EMBED_FOOTER || 'Sistema Automático de Alertas'
         })
         .setTimestamp();
 
@@ -71,24 +89,21 @@ client.on('presenceUpdate', async (oldP, newP) => {
       if (STREAMER_ROLE) {
         try {
           await member.roles.add(STREAMER_ROLE);
+          console.log(`+ Cargo adicionado a ${member.user.tag}`);
         } catch (err) {
-          console.warn(
-            `⚠ Não consegui adicionar o cargo ${STREAMER_ROLE} ao usuário ${member.user.tag}`
-          );
+          console.warn(`⚠ Não consegui adicionar o cargo:`, err.message);
         }
       }
 
-      // Enviar mensagem no canal
+      // Enviar mensagem
       if (channel && channel.isTextBased()) {
-        channel
-          .send({
-            content: STREAMER_ROLE ? `<@&${STREAMER_ROLE}>` : null,
-            embeds: [embed]
-          })
-          .catch(() => {});
+        await channel.send({
+          content: STREAMER_ROLE ? `<@&${STREAMER_ROLE}>` : null,
+          embeds: [embed]
+        });
       }
 
-      // Emitir evento realtime
+      // Notificação realtime
       realtime.emit('streamStart', {
         userId: member.user.id,
         username: member.user.username,
@@ -100,17 +115,15 @@ client.on('presenceUpdate', async (oldP, newP) => {
       return;
     }
 
-    // → PAROU DE STREAMAR
+    // --- PAROU DE STREAMAR ---
     if (wasStreaming && !isNowStreaming) {
-      console.log(`📴 ${member.user.tag} parou de streamar.`);
+      console.log(`📴 ${member.user.tag} parou a transmissão.`);
 
       if (STREAMER_ROLE) {
         try {
           await member.roles.remove(STREAMER_ROLE);
         } catch (err) {
-          console.warn(
-            `⚠ Não consegui remover o cargo ${STREAMER_ROLE} do usuário ${member.user.tag}`
-          );
+          console.warn(`⚠ Não consegui remover o cargo:`, err.message);
         }
       }
 
@@ -122,14 +135,14 @@ client.on('presenceUpdate', async (oldP, newP) => {
       });
     }
   } catch (err) {
-    console.error('❌ Erro no presenceUpdate:', err);
+    console.error("❌ Erro no presenceUpdate:", err);
   }
 });
 
-// Export
+// EXPORT
 module.exports = client;
 
-// Se executar diretamente
+// Executar diretamente
 if (require.main === module) {
   client.login(process.env.DISCORD_TOKEN).catch(console.error);
 }
