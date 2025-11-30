@@ -24,19 +24,24 @@ const client = new Client({
 // ENV
 const CHANNEL = process.env.STREAM_ANNOUNCE_CHANNEL;
 const STREAMER_ROLE = process.env.STREAMER_ROLE;
-const GUILD_ID = process.env.GUILD_ID; // necessario para comandos slash
+const GUILD_ID = process.env.GUILD_ID;
 
 // Detectar se o usuário está transmitindo
 function isStreaming(presence) {
   if (!presence?.activities?.length) return false;
-  return presence.activities.some(a => a.type === ActivityType.Streaming);
+  const streamingActivity = presence.activities.find(a => a.type === ActivityType.Streaming);
+  if (streamingActivity) {
+    console.log(`👀 Streaming detectado: ${presence.user?.tag || 'unknown'} | ${streamingActivity.name}`);
+    return true;
+  }
+  return false;
 }
 
 // Função para anunciar streaming
 async function announceStream(member, guild) {
   const channel = client.channels.cache.get(CHANNEL) || guild.channels.cache.get(CHANNEL);
 
-  if (STREAMER_ROLE) {
+  if (STREAMER_ROLE && !member.roles.cache.has(STREAMER_ROLE)) {
     try {
       await member.roles.add(STREAMER_ROLE);
       console.log(`+ Cargo adicionado a ${member.user.tag}`);
@@ -75,16 +80,19 @@ client.once('ready', async () => {
   console.log(`✅ Bot iniciado como ${client.user.tag}`);
 
   try {
-    const channel =
-      client.channels.cache.get(CHANNEL) ||
-      (await client.channels.fetch(CHANNEL).catch(() => null));
-
-    if (channel?.isTextBased()) {
-      await channel.send("🔵 **Bot iniciado e pronto para uso!**");
-      console.log("📢 Mensagem inicial enviada com sucesso.");
-    }
+    const channel = client.channels.cache.get(CHANNEL) || await client.channels.fetch(CHANNEL).catch(() => null);
+    if (channel?.isTextBased()) await channel.send("🔵 **Bot iniciado e pronto para uso!**");
   } catch (err) {
     console.error("❌ Erro ao enviar a mensagem inicial:", err);
+  }
+
+  // Varredura automática para detectar quem já está transmitindo
+  const guild = client.guilds.cache.get(GUILD_ID);
+  if (guild) {
+    await guild.members.fetch();
+    guild.members.cache.forEach(member => {
+      if (isStreaming(member.presence)) announceStream(member, guild);
+    });
   }
 
   // Registrar comandos slash
@@ -120,7 +128,9 @@ client.on('presenceUpdate', async (oldP, newP) => {
 
     if (wasStreaming && !isNowStreaming) {
       console.log(`📴 ${member.user.tag} parou a transmissão.`);
-      if (STREAMER_ROLE) await member.roles.remove(STREAMER_ROLE).catch(() => {});
+      if (STREAMER_ROLE && member.roles.cache.has(STREAMER_ROLE)) {
+        await member.roles.remove(STREAMER_ROLE).catch(err => console.warn(err.message));
+      }
       realtime.emit('streamStop', {
         userId: member.user.id,
         username: member.user.username,
@@ -141,7 +151,7 @@ client.on('interactionCreate', async interaction => {
 
   if (interaction.commandName === 'varredura') {
     await interaction.reply('🔎 Iniciando varredura de membros...');
-    await guild.members.fetch(); // garante que todos membros estão carregados
+    await guild.members.fetch();
 
     const streamingMembers = guild.members.cache.filter(m => isStreaming(m.presence));
     if (!streamingMembers.size) {
