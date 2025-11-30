@@ -4,21 +4,16 @@ const {
   GatewayIntentBits,
   Partials,
   EmbedBuilder,
-  ActivityType,
   SlashCommandBuilder,
   Routes
 } = require('discord.js');
 const { REST } = require('@discordjs/rest');
-const fetch = require('node-fetch'); // npm install node-fetch
+const fetch = require('node-fetch');
 const realtime = require('./realtime');
 
 const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildPresences
-  ],
-  partials: [Partials.GuildMember, Partials.User]
+  intents: [GatewayIntentBits.Guilds],
+  partials: [Partials.User]
 });
 
 // ENV
@@ -26,38 +21,16 @@ const CHANNEL = process.env.STREAM_ANNOUNCE_CHANNEL;
 const STREAMER_ROLE = process.env.STREAMER_ROLE;
 const GUILD_ID = process.env.GUILD_ID;
 
-// ---------------------- Funções auxiliares ----------------------
-
-// Detecta streaming no Discord
-function isStreaming(presence) {
-  if (!presence?.activities?.length) return false;
-  const streamingActivity = presence.activities.find(a => a.type === ActivityType.Streaming);
-  if (streamingActivity) {
-    console.log(`👀 Streaming detectado: ${presence.user?.tag || 'unknown'} | ${streamingActivity.name}`);
-    return true;
-  }
-  return false;
-}
-
-// Anunciar streaming no canal e adicionar cargo
-async function announceStream(member, guild) {
+// Função para anunciar live
+async function announceStream(username, guild, platform, streamUrl) {
   const channel = client.channels.cache.get(CHANNEL) || guild.channels.cache.get(CHANNEL);
-
-  if (STREAMER_ROLE && !member.roles.cache.has(STREAMER_ROLE)) {
-    try {
-      await member.roles.add(STREAMER_ROLE);
-      console.log(`+ Cargo adicionado a ${member.user.tag}`);
-    } catch (err) {
-      console.warn(`⚠ Não consegui adicionar o cargo:`, err.message);
-    }
-  }
 
   if (channel?.isTextBased()) {
     const embed = new EmbedBuilder()
       .setColor(process.env.EMBED_COLOR || '#9146ff')
-      .setTitle(process.env.EMBED_TITLE || '🎬 Live AO VIVO!')
-      .setDescription(`**${member.displayName}** iniciou a transmissão!`)
-      .setThumbnail(member.user.displayAvatarURL())
+      .setTitle(process.env.EMBED_TITLE || `🎬 Live AO VIVO!`)
+      .setDescription(`**${username}** iniciou transmissão no **${platform}**!`)
+      .setURL(streamUrl)
       .setFooter({ text: process.env.EMBED_FOOTER || 'Sistema Automático de Alertas' })
       .setTimestamp();
 
@@ -67,76 +40,66 @@ async function announceStream(member, guild) {
     });
   }
 
+  // Notificação realtime (opcional)
   if (realtime) {
     realtime.emit('streamStart', {
-      userId: member.user.id,
-      username: member.user.username,
-      displayName: member.displayName,
-      avatar: member.user.displayAvatarURL(),
-      startedAt: new Date().toISOString()
+      username,
+      platform,
+      startedAt: new Date().toISOString(),
+      streamUrl
     });
   }
 }
 
-// ---------------------- Twitch ----------------------
-async function checkTwitchLiveForVarredura(guild) {
+// Verifica se o canal da Twitch está ao vivo
+async function checkTwitchLive() {
   const clientId = process.env.TWITCH_CLIENT_ID;
   const clientSecret = process.env.TWITCH_CLIENT_SECRET;
-  const users = process.env.TWITCH_USERS?.split(',').map(u => u.trim());
-  if (!clientId || !clientSecret || !users?.length) return [];
+  const username = process.env.TWITCH_USER;
 
-  const tokenRes = await fetch(
-    `https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`,
-    { method: 'POST' }
-  );
+  if (!clientId || !clientSecret || !username) return null;
+
+  // Obter token
+  const tokenRes = await fetch(`https://id.twitch.tv/oauth2/token?client_id=${clientId}&client_secret=${clientSecret}&grant_type=client_credentials`, { method: 'POST' });
   const tokenData = await tokenRes.json();
-  if (!tokenData.access_token) return [];
+  if (!tokenData.access_token) return null;
 
-  const query = users.map(u => `user_login=${u}`).join('&');
-  const res = await fetch(`https://api.twitch.tv/helix/streams?${query}`, {
+  // Verificar live
+  const res = await fetch(`https://api.twitch.tv/helix/streams?user_login=${username}`, {
     headers: { 'Client-ID': clientId, 'Authorization': `Bearer ${tokenData.access_token}` }
   });
   const data = await res.json();
-  if (!data?.data?.length) return [];
 
-  const streamingMembers = [];
-  data.data.forEach(stream => {
-    const member = guild.members.cache.find(
-      m => m.user.username.toLowerCase() === stream.user_name.toLowerCase()
-    );
-    if (member) streamingMembers.push(member);
-  });
-  return streamingMembers;
-}
-
-// ---------------------- YouTube ----------------------
-async function checkYouTubeLiveForVarredura(guild) {
-  const apiKey = process.env.YOUTUBE_API_KEY;
-  const channels = process.env.YOUTUBE_CHANNELS?.split(',').map(c => c.trim());
-  if (!apiKey || !channels?.length) return [];
-
-  const streamingMembers = [];
-  for (const channelId of channels) {
-    const res = await fetch(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&eventType=live&key=${apiKey}`
-    );
-    const data = await res.json();
-    if (data.items?.length) {
-      // Para YouTube, você precisa mapear channelId -> membro
-      const member = guild.members.cache.find(
-        m => m.user.username.toLowerCase() === channelId.toLowerCase()
-      );
-      if (member) streamingMembers.push(member);
-    }
+  if (data?.data?.length && data.data[0].type === 'live') {
+    const streamUrl = `https://www.twitch.tv/${username}`;
+    return { username, platform: 'Twitch', url: streamUrl };
   }
-  return streamingMembers;
+  return null;
 }
 
-// ---------------------- Eventos ----------------------
+// Verifica se o canal do YouTube está ao vivo
+async function checkYouTubeLive() {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  const channelId = process.env.YOUTUBE_CHANNEL;
 
-// Ready
+  if (!apiKey || !channelId) return null;
+
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&type=video&eventType=live&key=${apiKey}`);
+  const data = await res.json();
+
+  if (data.items?.length) {
+    const videoId = data.items[0].id.videoId;
+    const username = data.items[0].snippet.channelTitle;
+    const streamUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    return { username, platform: 'YouTube', url: streamUrl };
+  }
+  return null;
+}
+
+// Evento ready
 client.once('ready', async () => {
   console.log(`✅ Bot iniciado como ${client.user.tag}`);
+
   try {
     const channel = client.channels.cache.get(CHANNEL) || await client.channels.fetch(CHANNEL).catch(() => null);
     if (channel?.isTextBased()) await channel.send("🔵 **Bot iniciado e pronto para uso!**");
@@ -146,7 +109,7 @@ client.once('ready', async () => {
 
   // Registrar comandos slash
   const commands = [
-    new SlashCommandBuilder().setName('varredura').setDescription('Verifica membros que estão transmitindo'),
+    new SlashCommandBuilder().setName('varredura').setDescription('Verifica se os canais configurados estão ao vivo'),
     new SlashCommandBuilder().setName('teste').setDescription('Envia mensagem de teste')
   ].map(cmd => cmd.toJSON());
 
@@ -159,61 +122,28 @@ client.once('ready', async () => {
   }
 });
 
-// PresenceUpdate
-client.on('presenceUpdate', async (oldP, newP) => {
-  try {
-    if (!newP?.member || !newP.guild) return;
-    const member = newP.member;
-    const guild = newP.guild;
-
-    const wasStreaming = isStreaming(oldP);
-    const isNowStreaming = isStreaming(newP);
-
-    if (!wasStreaming && isNowStreaming) {
-      console.log(`🎥 ${member.user.tag} começou a streamar.`);
-      await announceStream(member, guild);
-    }
-
-    if (wasStreaming && !isNowStreaming) {
-      console.log(`📴 ${member.user.tag} parou a transmissão.`);
-      if (STREAMER_ROLE && member.roles.cache.has(STREAMER_ROLE)) {
-        await member.roles.remove(STREAMER_ROLE).catch(err => console.warn(err.message));
-      }
-      if (realtime) {
-        realtime.emit('streamStop', {
-          userId: member.user.id,
-          username: member.user.username,
-          displayName: member.displayName,
-          stoppedAt: new Date().toISOString()
-        });
-      }
-    }
-  } catch (err) {
-    console.error("❌ Erro no presenceUpdate:", err);
-  }
-});
-
-// Interações (comandos slash)
+// Comandos slash
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand()) return;
   const guild = interaction.guild;
 
   if (interaction.commandName === 'varredura') {
-    await interaction.reply('🔎 Iniciando varredura completa de membros...');
-    await guild.members.fetch(); // Só rodar no comando, sob demanda
+    await interaction.reply('🔎 Iniciando varredura de streams...');
 
-    const discordStreaming = guild.members.cache.filter(m => isStreaming(m.presence));
-    const twitchStreaming = await checkTwitchLiveForVarredura(guild);
-    const youtubeStreaming = await checkYouTubeLiveForVarredura(guild);
+    const twitchLive = await checkTwitchLive();
+    const ytLive = await checkYouTubeLive();
 
-    const allStreamingMembers = new Map();
-    [...discordStreaming.values(), ...twitchStreaming, ...youtubeStreaming].forEach(m => allStreamingMembers.set(m.id, m));
+    const allStreams = [];
+    if (twitchLive) allStreams.push(twitchLive);
+    if (ytLive) allStreams.push(ytLive);
 
-    if (!allStreamingMembers.size) {
-      await interaction.followUp('Nenhum membro está transmitindo agora.');
+    if (!allStreams.length) {
+      await interaction.followUp('Nenhum canal está ao vivo agora.');
     } else {
-      for (const member of allStreamingMembers.values()) announceStream(member, guild);
-      await interaction.followUp(`✅ Varredura completa concluída. ${allStreamingMembers.size} membros notificados.`);
+      for (const stream of allStreams) {
+        await announceStream(stream.username, guild, stream.platform, stream.url);
+      }
+      await interaction.followUp(`✅ Varredura concluída. ${allStreams.length} canal(es) notificado(s).`);
     }
   }
 
@@ -228,10 +158,9 @@ client.on('interactionCreate', async interaction => {
   }
 });
 
-// Export
+// Export e login
 module.exports = client;
 
-// Executar diretamente
 if (require.main === module) {
   client.login(process.env.DISCORD_TOKEN).catch(console.error);
 }
