@@ -94,7 +94,7 @@ client.on('presenceUpdate', async (oldP, newP) => {
           console.warn(`⚠ Não consegui adicionar o cargo:`, err.message);
         }
       }
-
+ 
       // Enviar mensagem
       if (channel && channel.isTextBased()) {
         await channel.send({
